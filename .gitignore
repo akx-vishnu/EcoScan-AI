@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+*.env
+*.env.local
+instance/
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage
+
+# Database
+*.sqlite3
+*.db
+users.db
+
+# React / Node
+node_modules/
+dist/
+build/
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# Uploads
+backend/flask_app/uploads/*
+!backend/flask_app/uploads/.gitkeep
