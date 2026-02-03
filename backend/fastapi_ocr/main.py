@@ -15,4 +15,12 @@ async def extract_text(file: UploadFile = File(...)):
     return {
         "raw_text": text
     }
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Set Tesseract path from environment variable, falling back gracefully or needing check if distinct per OS
+tesseract_path = os.getenv("TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path

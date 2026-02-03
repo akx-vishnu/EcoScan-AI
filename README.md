@@ -9,6 +9,7 @@ EcoScan AI is an intelligent food analysis application designed to help users ma
 - **🌍 Eco Score**: Evaluates the environmental impact of products based on ingredients and packaging.
 - **💬 AI Chatbot Assistant**: Ask questions about products, ingredients, or health effects in real-time.
 - **📜 Scan History**: Keep track of all your past scans and re-visit analysis details.
+- **🏭 Manufacturer & Compliance**: Extracts manufacturer details, FSSAI licenses, and expiry dates.
 - **🔒 Secure Authentication**: User accounts to save preferences and history.
 
 ## 🛠 Tech Stack
@@ -67,21 +68,22 @@ The backend consists of two services: the main Flask app and the FastAPI OCR ser
 
 #### ⚠️ Configuration (Crucial Step)
 
-Because this project uses hardcoded paths and keys, you **MUST** verify/update the following files to match your system:
+This project uses `.env` files for configuration to ensure security and flexibility. You **MUST** create these files in the respective directories before running the application.
 
-1. **Tesseract Path**:
-    - Open `backend/fastapi_ocr/main.py`.
-    - Locate the line setting `pytesseract.pytesseract.tesseract_cmd`.
-    - Update it to point to your Tesseract installation:
-      ```python
-      # Example for Windows
-      pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-      ```
+1. **Backend Flask App (`backend/flask_app/.env`)**:
+   Create a file named `.env` in `backend/flask_app` and add the following:
+   ```env
+   GROQ_API_KEY=gsk_your_actual_groq_api_key_here
+   FLASK_SECRET_KEY=your_secure_random_string
+   ```
+   *Get your API key from [Groq Console](https://console.groq.com/keys).*
 
-2. **Groq API Key**:
-    - Open `backend/flask_app/groq_ai.py`.
-    - Locate the `api_key` in the `Groq` client initialization.
-    - Replace it with your own Groq API key if the existing one is invalid or if you want to use your own quota.
+2. **OCR Service (`backend/fastapi_ocr/.env`)**:
+   Create a file named `.env` in `backend/fastapi_ocr` and add the following:
+   ```env
+   # Update this path to match your Tesseract installation
+   TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+   ```
 
 #### Running the Services
 

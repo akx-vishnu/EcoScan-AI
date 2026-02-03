@@ -21,6 +21,7 @@ const Scan = () => {
     const [crop, setCrop] = useState({ x: 0, y: 0 });
     const [zoom, setZoom] = useState(1);
     const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+    const [scanBlob, setScanBlob] = useState(null); // Store blob for upload
 
     const navigate = useNavigate();
 
@@ -28,6 +29,7 @@ const Scan = () => {
         const imageSrc = webcamRef.current.getScreenshot();
         setOriginalImgSrc(imageSrc);
         setImgSrc(imageSrc);
+        setScanBlob(null);
         setIsCropping(false);
     }, [webcamRef]);
 
@@ -37,6 +39,7 @@ const Scan = () => {
         setIsCropping(false);
         setZoom(1);
         setCrop({ x: 0, y: 0 });
+        setScanBlob(null);
     };
 
     const startCrop = () => {
@@ -57,6 +60,7 @@ const Scan = () => {
             reader.onloadend = () => {
                 setOriginalImgSrc(reader.result);
                 setImgSrc(reader.result);
+                setScanBlob(null);
                 setIsCropping(false);
             };
             reader.readAsDataURL(file);
@@ -72,6 +76,7 @@ const Scan = () => {
             const croppedBlob = await getCroppedImg(originalImgSrc, croppedAreaPixels);
             const croppedUrl = URL.createObjectURL(croppedBlob);
             setImgSrc(croppedUrl);
+            setScanBlob(croppedBlob); // Save the blob for upload
             setIsCropping(false);
         } catch (e) {
             console.error(e);
@@ -83,9 +88,20 @@ const Scan = () => {
         setIsScanning(true);
 
         try {
-            const res = await fetch(imgSrc);
-            const blob = await res.blob();
-            const file = new File([blob], "scan.jpg", { type: "image/jpeg" });
+            let file;
+            if (scanBlob) {
+                file = new File([scanBlob], "scan.jpg", { type: "image/jpeg" });
+            } else if (imgSrc && imgSrc.startsWith("data:")) {
+                // Handle base64 (e.g. from camera capture without crop)
+                const res = await fetch(imgSrc);
+                const blob = await res.blob();
+                file = new File([blob], "scan.jpg", { type: "image/jpeg" });
+            } else {
+                // Fallback for uploaded file if not cropped (though logic suggests it sets imgSrc to dataURL)
+                const res = await fetch(imgSrc);
+                const blob = await res.blob();
+                file = new File([blob], "scan.jpg", { type: "image/jpeg" });
+            }
 
             const result = await scanProduct(file);
 

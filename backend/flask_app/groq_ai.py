@@ -6,7 +6,6 @@ import traceback
 
 # Load environment variables from .env
 load_dotenv()
-
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
@@ -15,6 +14,7 @@ if not GROQ_API_KEY:
 groq_client = Groq(
     api_key=GROQ_API_KEY
 )
+
 
 def analyze_product_risk(ocr_text, user_prefs):
     """
@@ -33,7 +33,7 @@ def analyze_product_risk(ocr_text, user_prefs):
         f"\n\nUSER PREFERENCES:\n{json.dumps(user_prefs, indent=2)}\n\n"
         f"OCR TEXT:\n{ocr_text}\n\n"
         f"INSTRUCTIONS:\n"
-        f"1. Extract Product Details: Name, description, ingredients (with percentage if available), nutritional facts per 100g/serving.\n"
+        f"1. Extract Product Details: Name, description, ingredients (with percentage if available), nutritional facts per 100g/serving, manufacturer details, FSSAI/license numbers, expiry dates, manufacturing dates, MRP, and net quantity.\n"
         f"2. Analyze Ingredients: Identify allergens, additives, and compatibility with the user's diet (e.g., Vegan, Keto).\n"
         f"3. Personalize Risk: Compare ingredients against User Preferences (Health Conditions, Allergies, Ingredients to Avoid).\n"
         f"4. Compute Scores (0-100):\n"
@@ -56,7 +56,7 @@ def analyze_product_risk(ocr_text, user_prefs):
         f"  \"nutritional_benefits\": [\"string\"],\n"
         f"  \"personalized_notes\": [\"string\"],\n"
         f"  \"detected_allergens\": [\"string\"],\n"
-        f"  \"other_info\": {{ \"brand\": \"string\", \"origin\": \"string\", \"certifications\": [\"string\"] }},\n"
+        f"  \"other_info\": {{ \"manufacturer_details\": \"string\", \"fssai_or_license_numbers\": [\"string\"], \"expiry_or_best_before\": \"string\", \"manufacturing_date\": \"string\", \"mrp_price\": \"string\", \"net_quantity\": \"string\", \"brand\": \"string\", \"origin\": \"string\", \"certifications\": [\"string\"] }},\n"
         f"  \"reasoning\": \"string (brief summary of why this score/verdict)\"\n"
         f"}}"
     )

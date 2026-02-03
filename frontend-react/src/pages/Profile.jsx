@@ -19,12 +19,13 @@ const Profile = () => {
         const fetchProfile = async () => {
             const data = await getProfile();
             if (data) {
-                // Determine if data is wrapped in a 'data' property or returned directly
-                // The API might return { username: ..., healthConditions: ... } directly
-                // or { success: true, data: { ... } } depending on implementation consistency.
-                // Based on app.py: return jsonify({ username: ..., healthConditions: ... })
-                // So data is the object itself.
-                setFormData(data);
+                // Ensure no null values are set in formData
+                setFormData({
+                    healthConditions: data.healthConditions || '',
+                    allergies: data.allergies || '',
+                    dietType: data.dietType || 'general',
+                    ingredientsToAvoid: data.ingredientsToAvoid || ''
+                });
                 if (data.username) {
                     setUsername(data.username);
                 }
@@ -44,6 +45,7 @@ const Profile = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
+        // formData only contains the editable fields now
         const result = await updateProfile(formData);
         setLoading(false);
         setMessage(result.message);

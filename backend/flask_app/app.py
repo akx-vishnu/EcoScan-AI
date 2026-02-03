@@ -11,11 +11,42 @@ import requests
 import urllib.parse
 from groq_ai import analyze_product_risk, chat_with_groq
 from datetime import datetime
+from schemas import SignupSchema, ProfileUpdateSchema
+from marshmallow import ValidationError
+from marshmallow import ValidationError
+import logging
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+# Configure Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Initialize Thread Pool
+executor = ThreadPoolExecutor(max_workers=2)
+
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:5173"], supports_credentials=True)
-app.config['SECRET_KEY'] = 'your-secret-key'  # Use a strong, unique key in production
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+
+# Calculate paths relative to project root
+# current: backend/flask_app/app.py
+# root: ../../
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+instance_path = os.path.join(BASE_DIR, 'instance')
+os.makedirs(instance_path, exist_ok=True)
+DB_PATH = os.path.join(instance_path, 'users.db')
+
+app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev_fallback_secret_key')
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_PATH}'
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 app.config['SESSION_COOKIE_SECURE'] = True  # Set to True in production with HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -55,6 +86,104 @@ class ScanHistory(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     full_analysis = db.Column(db.Text)  # Store full JSON analysis if needed
 
+class Task(db.Model):
+    id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    status = db.Column(db.String(20), default='PENDING') # PENDING, PROCESSING, COMPLETED, FAILED
+    result = db.Column(db.Text, nullable=True) # JSON string
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+def process_scan_task(app_instance, task_id, filename, filepath, user_prefs, user_id):
+    """Background worker to process the scan."""
+    with app_instance.app_context():
+        logger.info(f"Starting background task {task_id}")
+        task = Task.query.get(task_id)
+        if not task:
+            logger.error(f"Task {task_id} not found in background worker")
+            return
+        
+        task.status = 'PROCESSING'
+        db.session.commit()
+        
+        try:
+            # 1. OCR
+            ocr_text = "OCR failed"
+            try:
+                with open(filepath, 'rb') as f:
+                    files = {'file': (filename, f, 'image/jpeg')}
+                    logger.info(f"Task {task_id}: Sending to OCR...")
+                    response = requests.post('http://localhost:8000/ocr', files=files, timeout=30)
+                    if response.status_code == 200:
+                        ocr_data = response.json()
+                        ocr_text = ocr_data.get('raw_text', '').strip()
+                        logger.info(f"Task {task_id}: OCR Success")
+                    else:
+                        raise Exception(f"OCR API error: {response.status_code}")
+            except Exception as e:
+                logger.error(f"Task {task_id}: OCR Error: {e}")
+                # We continue even if OCR fails, AI might handle empty text or we catch it there
+            
+            # 2. AI Analysis
+            from groq_ai import analyze_product_risk
+            logger.info(f"Task {task_id}: Starting AI analysis...")
+            ai_analysis = analyze_product_risk(ocr_text, user_prefs)
+            
+            if "error" in ai_analysis:
+                raise Exception(f"AI Analysis failed: {ai_analysis['error']}")
+
+            # 3. Save to History
+            health_score = ai_analysis.get('health_score', 50)
+            eco_score = ai_analysis.get('eco_score', 50)
+            
+            # Additional context for Chatbot
+            nutritional_benefits = ai_analysis.get('nutritional_benefits', [])
+            personalized_notes = ai_analysis.get('personalized_notes', [])
+            context = (
+                f"Product: {ai_analysis.get('product_name', 'Unknown')}. "
+                f"Health Score: {health_score}/100. "
+                f"Eco Score: {eco_score}/100. "
+                f"Verdict: {ai_analysis.get('verdict', 'unknown')}. "
+                f"Benefits: {', '.join(nutritional_benefits)}. "
+                f"Warnings: {', '.join(personalized_notes)}. "
+                f"User Preferences Applied: {user_prefs['health_conditions']}, {user_prefs['allergies']}."
+            )
+
+            new_scan = ScanHistory(
+                user_id=user_id,
+                product_name=ai_analysis.get('product_name', 'Unknown Product'),
+                health_score=health_score,
+                eco_score=eco_score,
+                image_filename=filename,
+                full_analysis=json.dumps(ai_analysis)
+            )
+            db.session.add(new_scan)
+            
+            # 4. Update Task
+            final_result = {
+                "structureData": ai_analysis,
+                "healthScore": health_score,
+                "ecoScore": eco_score,
+                "ecoScoreReasoning": ai_analysis.get('eco_score_reasoning', ''),
+                "benefits": nutritional_benefits,
+                "notes": personalized_notes,
+                "context": context,
+                "userPreferences": user_prefs,
+                "detectedAllergens": ai_analysis.get('detected_allergens', []),
+                "productImage": f"/uploads/{filename}"
+            }
+            
+            task.result = json.dumps(final_result)
+            task.status = 'COMPLETED'
+            db.session.commit()
+            logger.info(f"Task {task_id} completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Task {task_id} failed: {e}", exc_info=True)
+            task.status = 'FAILED'
+            task.result = str(e)
+            db.session.commit()
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -72,16 +201,22 @@ def api_login():
     if user and check_password_hash(user.password, password):
         login_user(user, remember=True)  # Persistent session
         session.permanent = True
-        print(f"Login successful for user: {username}")
+        logger.info(f"Login successful for user: {username}")
         return jsonify({"success": True, "message": "Logged in successfully"})
+    logger.warning(f"Failed login attempt for user: {username}")
     return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
 @app.route('/api/signup', methods=['POST'])
 def api_signup():
     data = request.get_json()
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
+    try:
+        validated_data = SignupSchema().load(data)
+    except ValidationError as err:
+        return jsonify({"success": False, "message": "Validation error", "errors": err.messages}), 400
+
+    username = validated_data.get('username')
+    email = validated_data.get('email')
+    password = validated_data.get('password')
     
     if User.query.filter_by(username=username).first():
         return jsonify({"success": False, "message": "Username already exists"}), 400
@@ -95,7 +230,7 @@ def api_signup():
     db.session.commit()
     login_user(new_user, remember=True)
     session.permanent = True
-    print(f"Signup successful for user: {username}")
+    logger.info(f"Signup successful for user: {username}")
     return jsonify({"success": True, "message": "Account created successfully"})
 
 @app.route('/api/logout', methods=['POST'])
@@ -107,7 +242,7 @@ def api_logout():
 @app.route('/api/profile', methods=['GET', 'POST'])
 @login_required
 def api_profile():
-    print(f"Profile request - User authenticated: {current_user.is_authenticated}, User: {current_user.username if current_user.is_authenticated else 'None'}")
+    logger.debug(f"Profile request - User authenticated: {current_user.is_authenticated}, User: {current_user.username if current_user.is_authenticated else 'None'}")
     if request.method == 'GET':
         return jsonify({
             "username": current_user.username,
@@ -118,123 +253,96 @@ def api_profile():
         })
     elif request.method == 'POST':
         data = request.get_json()
-        current_user.health_conditions = data.get('healthConditions', '')
-        current_user.allergies = data.get('allergies', '')
-        current_user.diet_type = data.get('dietType', 'general')
-        current_user.ingredients_to_avoid = data.get('ingredientsToAvoid', '')
+        try:
+            validated_data = ProfileUpdateSchema().load(data)
+        except ValidationError as err:
+            return jsonify({"success": False, "message": "Validation error", "errors": err.messages}), 400
+            
+        current_user.health_conditions = validated_data.get('healthConditions', '')
+        current_user.allergies = validated_data.get('allergies', '')
+        current_user.diet_type = validated_data.get('dietType', 'general')
+        current_user.ingredients_to_avoid = validated_data.get('ingredientsToAvoid', '')
         db.session.commit()
-        print(f"Profile updated for user: {current_user.username}")
+        logger.info(f"Profile updated for user: {current_user.username}")
         return jsonify({"success": True, "message": "Profile updated"})
 
 @app.route('/api/scan', methods=['POST'])
 @login_required
 def api_scan():
-    print(f"Scan request - User authenticated: {current_user.is_authenticated}, User: {current_user.username if current_user.is_authenticated else 'None'}")
+    logger.info(f"Scan request initiated by user: {current_user.username}")
+    
     if 'product_image' not in request.files:
+        logger.warning("Scan failed: No image provided in request")
         return jsonify({"success": False, "message": "No image provided"}), 400
     
     file = request.files['product_image']
     if file.filename == '':
+        logger.warning("Scan failed: No image selected")
         return jsonify({"success": False, "message": "No image selected"}), 400
     
-    # Save the uploaded file to uploads folder
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"{timestamp}_{secure_filename(file.filename)}"
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-    
-    # Send the saved image to OCR API
-    ocr_text = "OCR failed: Unable to extract text. Please try again."
     try:
-        with open(filepath, 'rb') as f:
-            files = {'file': (filename, f, 'image/jpeg')}
-            response = requests.post('http://localhost:8000/ocr', files=files, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                ocr_text = data.get('raw_text', '').strip()
-                print(f"OCR Success: {ocr_text[:100]}...")
-            else:
-                print(f"OCR API error: {response.status_code} - {response.text}")
-    except requests.exceptions.RequestException as e:
-        print(f"OCR Request Error: {e}")
-    
-    # Get user preferences for personalization
-    user_prefs = {
-        'health_conditions': current_user.health_conditions.lower(),
-        'allergies': current_user.allergies.lower(),
-        'diet_type': current_user.diet_type.lower(),
-        'ingredients_to_avoid': current_user.ingredients_to_avoid.lower()
-    }
-    print("=== USER PREFS JSON ===")
-    print(json.dumps(user_prefs, indent=2))
-    print("=======================")
-
-    # Analyze Product Risk using Groq
-    from groq_ai import analyze_product_risk # Import here to ensure latest version is used
-    ai_analysis = analyze_product_risk(ocr_text, user_prefs)
-    print(f"AI Analysis Keys: {list(ai_analysis.keys())}")
-    
-    # Extracted Data
-    structure_data = ai_analysis # The AI now returns the full structure including 'other_info', 'nutritional_facts', etc.
-    
-    # Normalize keys for the frontend if needed, or pass AI data directly if it matches
-    # Ensure mandatory fields exist for the frontend
-    
-    # Health Score & Eco Score from AI
-    health_score = ai_analysis.get('health_score', 50)
-    eco_score = ai_analysis.get('eco_score', 50)
-    
-    # Benefits & Notes
-    nutritional_benefits = ai_analysis.get('nutritional_benefits', [])
-    personalized_notes = ai_analysis.get('personalized_notes', [])
-    
-    # Detected Allergens
-    detected_allergens = ai_analysis.get('detected_allergens', [])
-
-    # Save to Scan History
-    try:
-        new_scan = ScanHistory(
-            user_id=current_user.id,
-            product_name=ai_analysis.get('product_name', 'Unknown Product'),
-            health_score=health_score,
-            eco_score=eco_score,
-            image_filename=filename,
-            full_analysis=json.dumps(ai_analysis)
-        )
-        db.session.add(new_scan)
+        # Save the uploaded file to uploads folder
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{secure_filename(file.filename)}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        logger.info(f"Image saved: {filename}")
+        
+        # Create Task
+        task_id = str(uuid.uuid4())
+        new_task = Task(id=task_id, user_id=current_user.id, status='PENDING')
+        db.session.add(new_task)
         db.session.commit()
-        print(f"Scan saved to history for user: {current_user.username}")
-    except Exception as e:
-        print(f"Error saving scan history: {e}")
-
-    # Context for Chatbot
-    context = (
-        f"Product: {ai_analysis.get('product_name', 'Unknown')}. "
-        f"Health Score: {health_score}/100. "
-        f"Eco Score: {eco_score}/100 ({ai_analysis.get('eco_score_reasoning', 'No reasoning provided')}). "
-        f"Verdict: {ai_analysis.get('verdict', 'unknown')}. "
-        f"Benefits: {', '.join(nutritional_benefits)}. "
-        f"Warnings: {', '.join(personalized_notes)}. "
-        f"User Preferences Applied: {user_prefs['health_conditions']}, {user_prefs['allergies']}."
-    )
-
-    return jsonify({
-        "success": True,
-        "data": {
-            "structureData": structure_data,
-            "healthScore": health_score,
-            "ecoScore": eco_score,
-            "ecoScoreReasoning": ai_analysis.get('eco_score_reasoning', ''), # New field
-            "benefits": nutritional_benefits,
-            "notes": personalized_notes,
-            "context": context,
-            "userPreferences": user_prefs,
-            "detectedAllergens": detected_allergens,
-            "userPreferences": user_prefs,
-            "detectedAllergens": detected_allergens,
-            "productImage": f"/uploads/{filename}"
+        
+        # Get user preferences
+        user_prefs = {
+            'health_conditions': current_user.health_conditions.lower(),
+            'allergies': current_user.allergies.lower(),
+            'diet_type': current_user.diet_type.lower(),
+            'ingredients_to_avoid': current_user.ingredients_to_avoid.lower()
         }
-    })
+        
+        # Submit to background executor
+        # Pass app (for context), IDs, and raw data needed
+        # app is the concrete Flask instance here, so we pass it directly
+        executor.submit(process_scan_task, app, task_id, filename, filepath, user_prefs, current_user.id)
+        
+        return jsonify({
+            "success": True, 
+            "message": "Scan processing started",
+            "task_id": task_id
+        }), 202
+
+    except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        logger.error(f"Error initiating scan: {e}")
+        
+        # Write to file for debugging
+        with open("error_log.txt", "w") as f:
+            f.write(error_msg)
+            
+        return jsonify({"success": False, "message": f"Server Error: {str(e)}"}), 500
+
+@app.route('/api/tasks/<task_id>', methods=['GET'])
+@login_required
+def api_get_task(task_id):
+    task = Task.query.filter_by(id=task_id, user_id=current_user.id).first()
+    if not task:
+        return jsonify({"success": False, "message": "Task not found"}), 404
+    
+    response = {
+        "id": task.id,
+        "status": task.status,
+        "created_at": task.created_at.isoformat()
+    }
+    
+    if task.status == 'COMPLETED':
+        response["result"] = json.loads(task.result)
+    elif task.status == 'FAILED':
+        response["error"] = task.result
+        
+    return jsonify({"success": True, "data": response})
 
 @app.route('/api/history', methods=['GET'])
 @login_required
@@ -261,10 +369,10 @@ def api_history_clear():
     try:
         ScanHistory.query.filter_by(user_id=current_user.id).delete()
         db.session.commit()
-        print(f"History cleared for user: {current_user.username}")
+        logger.info(f"History cleared for user: {current_user.username}")
         return jsonify({"success": True, "message": "History cleared successfully"})
     except Exception as e:
-        print(f"Error clearing history: {e}")
+        logger.error(f"Error clearing history: {e}")
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to clear history"}), 500
 

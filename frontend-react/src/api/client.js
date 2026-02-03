@@ -52,9 +52,19 @@ export const signupUser = async (username, email, password) => {
         return response.data;
     } catch (error) {
         console.log('Signup error:', error);
+        let message = error.response?.data?.message || error.message || 'Network error occurred';
+
+        // Append validation details if available
+        if (error.response?.data?.errors) {
+            const details = Object.entries(error.response.data.errors)
+                .map(([field, msgs]) => `${field}: ${msgs.join(', ')}`)
+                .join(' | ');
+            message += `: ${details}`;
+        }
+
         return {
             success: false,
-            message: error.response?.data?.message || error.message || 'Network error occurred'
+            message: message
         };
     }
 };
@@ -75,13 +85,47 @@ export const scanProduct = async (imageFile) => {
         const formData = new FormData();
         formData.append('product_image', imageFile);
 
+        // 1. Submit Scan Job
         const response = await api.post('/api/scan', formData, {
             headers: {
                 'Content-Type': 'multipart/form-data',
             }
         });
-        console.log('Scan response:', response.data);
+        console.log('Scan submission response:', response.data);
+
+        // Status 202 means Accepted/Async
+        if (response.status === 202 && response.data.task_id) {
+            const taskId = response.data.task_id;
+            console.log(`Polling for task ${taskId}...`);
+
+            // 2. Poll for Completion
+            return new Promise((resolve, reject) => {
+                const checkStatus = async () => {
+                    try {
+                        const taskRes = await api.get(`/api/tasks/${taskId}`);
+                        const taskData = taskRes.data.data;
+                        console.log('Task status:', taskData.status);
+
+                        if (taskData.status === 'COMPLETED') {
+                            resolve({ success: true, data: taskData.result });
+                        } else if (taskData.status === 'FAILED') {
+                            resolve({ success: false, message: taskData.error || 'Scan analysis failed' });
+                        } else {
+                            // Still processing, check again in 2s
+                            setTimeout(checkStatus, 2000);
+                        }
+                    } catch (e) {
+                        console.error('Polling error:', e);
+                        resolve({ success: false, message: 'Lost connection to scan task' });
+                    }
+                };
+                checkStatus();
+            });
+        }
+
+        // Fallback for immediate response (if logic changes back)
         return response.data;
+
     } catch (error) {
         console.log('Scan error:', error);
         if (error.response?.status === 401) {
@@ -116,7 +160,19 @@ export const updateProfile = async (profileData) => {
         return response.data;
     } catch (error) {
         console.log('Profile update error:', error);
-        return { success: false, message: error.message || 'Update failed' };
+        let message = error.message || 'Update failed';
+
+        // Append validation details if available
+        if (error.response?.data?.errors) {
+            const details = Object.entries(error.response.data.errors)
+                .map(([field, msgs]) => `${field}: ${msgs.join(', ')}`)
+                .join(' | ');
+            message += `: ${details}`;
+        } else if (error.response?.data?.message) {
+            message = error.response.data.message;
+        }
+
+        return { success: false, message: message };
     }
 };
 
