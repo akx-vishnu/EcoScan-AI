@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, Factory, Calendar, FileText, CheckCircle, AlertTriangle, AlertCircle, Copy } from 'lucide-react';
+import { ChevronDown, ChevronUp, Factory, Calendar, FileText, CheckCircle, AlertTriangle, AlertCircle, Copy, Phone, Mail, Globe } from 'lucide-react';
 
 const CompliancePanel = ({ data }) => {
     // data is expected to be structureData.other_info
@@ -7,6 +7,7 @@ const CompliancePanel = ({ data }) => {
     const [copied, setCopied] = useState(false);
 
     const manufacturer = data?.manufacturer_details || null;
+    const contact = data?.manufacturer_contact || {};
     const fssai = data?.fssai_or_license_numbers || [];
     const expiry = data?.expiry_or_best_before || null;
     const mfgDate = data?.manufacturing_date || null;
@@ -84,6 +85,30 @@ const CompliancePanel = ({ data }) => {
                                         style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--color-primary)', cursor: 'pointer', marginTop: '4px' }}
                                     >
                                         <Copy size={12} /> {copied ? 'Copied' : 'Copy Address'}
+                                    </div>
+
+                                    {/* Contact Details Section */}
+                                    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {contact.phone && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+                                                <Phone size={14} color="var(--color-text-secondary)" />
+                                                <a href={`tel:${contact.phone}`} style={{ color: 'var(--color-text-main)', textDecoration: 'none' }}>{contact.phone}</a>
+                                            </div>
+                                        )}
+                                        {contact.email && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+                                                <Mail size={14} color="var(--color-text-secondary)" />
+                                                <a href={`mailto:${contact.email}`} style={{ color: 'var(--color-text-main)', textDecoration: 'none' }}>{contact.email}</a>
+                                            </div>
+                                        )}
+                                        {contact.website && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+                                                <Globe size={14} color="var(--color-text-secondary)" />
+                                                <a href={contact.website.startsWith('http') ? contact.website : `https://${contact.website}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }}>
+                                                    {contact.website.replace(/^https?:\/\//, '')}
+                                                </a>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

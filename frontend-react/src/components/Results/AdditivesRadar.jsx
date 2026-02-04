@@ -54,7 +54,7 @@ const AdditivesRadar = ({ ingredients }) => {
 
             <div style={{ marginTop: '15px', color: 'var(--color-text-secondary)', fontSize: '0.8rem', display: 'flex', gap: '6px' }}>
                 <Info size={14} style={{ marginTop: '2px' }} />
-                <span>Processed additives can affect health. Tap for details.</span>
+                <span>Processed additives can affect health.</span>
             </div>
         </div>
     );

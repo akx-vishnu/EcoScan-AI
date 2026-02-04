@@ -7,7 +7,7 @@ const ProductHeader = ({ product, structureData }) => {
 
     // structureData usually has product_name, brand, category
     const name = structureData?.product_name || "Unknown Product";
-    const brand = structureData?.brand || "Unknown Brand";
+    const brand = structureData?.brand || structureData?.other_info?.brand || "Unknown Brand";
     const category = structureData?.category || "General Food";
 
     return (
