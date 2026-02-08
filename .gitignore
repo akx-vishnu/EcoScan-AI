@@ -35,3 +35,4 @@ yarn-error.log*
 # Uploads
 backend/flask_app/uploads/*
 !backend/flask_app/uploads/.gitkeep
+start_ecoscan_dev.bat
