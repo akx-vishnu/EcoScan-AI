@@ -426,6 +426,37 @@ body {
   }
 }
 
+@media (max-width: 768px) {
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.verdict-scores {
+  display: flex;
+  justify-content: center;
+  gap: 60px;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+}
+
+.verdict-divider {
+  width: 1px;
+  height: 100px;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.1), transparent);
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .verdict-scores {
+    gap: 20px;
+  }
+
+  .verdict-divider {
+    display: none;
+  }
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;

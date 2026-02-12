@@ -157,13 +157,7 @@ const Verdict = ({ ecoScore, healthScore, notes }) => {
                 </div>
 
                 {/* Circular Scores */}
-                <div style={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    gap: '60px',
-                    marginBottom: '30px',
-                    flexWrap: 'wrap'
-                }}>
+                <div className="verdict-scores">
                     <CircularScore
                         score={healthScore}
                         color={getScoreColor(healthScore)}
@@ -172,12 +166,7 @@ const Verdict = ({ ecoScore, healthScore, notes }) => {
                     />
 
                     {/* Divider for desktop */}
-                    <div style={{
-                        width: '1px',
-                        height: '100px',
-                        background: 'linear-gradient(180deg, transparent, rgba(255,255,255,0.1), transparent)',
-                        display: 'block'
-                    }}></div>
+                    <div className="verdict-divider"></div>
 
                     <CircularScore
                         score={ecoScore}
